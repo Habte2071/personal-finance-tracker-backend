@@ -3,12 +3,13 @@ import { User, UserCreateInput, LoginInput, AuthResponse, UserResponse } from '.
 import { hashPassword, comparePassword } from '../utils/password.utils';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt.utils';
 import { AppError } from '../middleware/error.middleware';
+import crypto from 'crypto';
 
 export class AuthService {
   async register(data: UserCreateInput): Promise<AuthResponse> {
     // Check if user exists
     const existingUser = await query<User>(
-      'SELECT id FROM users WHERE email = $1',
+      'SELECT id FROM users WHERE email = ?',
       [data.email.toLowerCase()]
     );
 
@@ -19,12 +20,15 @@ export class AuthService {
     // Hash password
     const passwordHash = await hashPassword(data.password);
 
+    // Generate UUID for new user
+    const id = crypto.randomUUID();
+
     // Create user
-    const result = await query<User>(
-      `INSERT INTO users (email, password_hash, first_name, last_name, currency) 
-       VALUES ($1, $2, $3, $4, $5) 
-       RETURNING id, email, first_name, last_name, currency, created_at`,
+    await query(
+      `INSERT INTO users (id, email, password_hash, first_name, last_name, currency) 
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
+        id,
         data.email.toLowerCase(),
         passwordHash,
         data.first_name,
@@ -33,15 +37,22 @@ export class AuthService {
       ]
     );
 
-    const user = result.rows[0];
+    // Retrieve created user
+    const userResult = await query<User>(
+      'SELECT id, email, first_name, last_name, currency, created_at FROM users WHERE id = ?',
+      [id]
+    );
+    const user = userResult.rows[0];
 
     // Create default accounts for new user
+    const cashId = crypto.randomUUID();
+    const checkingId = crypto.randomUUID();
     await query(
-      `INSERT INTO accounts (user_id, name, type, balance, description) 
+      `INSERT INTO accounts (id, user_id, name, type, balance, description) 
        VALUES 
-       ($1, 'Cash', 'cash', 0, 'Physical cash'),
-       ($1, 'Main Checking', 'checking', 0, 'Primary checking account')`,
-      [user.id]
+       (?, ?, 'Cash', 'cash', 0, 'Physical cash'),
+       (?, ?, 'Main Checking', 'checking', 0, 'Primary checking account')`,
+      [cashId, user.id, checkingId, user.id]
     );
 
     // Generate tokens
@@ -57,7 +68,7 @@ export class AuthService {
 
   async login(data: LoginInput): Promise<AuthResponse> {
     const result = await query<User>(
-      'SELECT id, email, password_hash, first_name, last_name, currency, created_at FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, first_name, last_name, currency, created_at FROM users WHERE email = ?',
       [data.email.toLowerCase()]
     );
 
@@ -89,7 +100,7 @@ export class AuthService {
       const decoded = verifyRefreshToken(refreshToken);
       
       const result = await query<User>(
-        'SELECT id, email FROM users WHERE id = $1',
+        'SELECT id, email FROM users WHERE id = ?',
         [decoded.userId]
       );
 

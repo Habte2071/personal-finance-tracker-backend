@@ -1,6 +1,7 @@
 import { query } from '../config/database';
 import { Budget, BudgetCreateInput } from '../types';
 import { AppError } from '../middleware/error.middleware';
+import crypto from 'crypto';
 
 export class BudgetService {
   async getAllBudgets(userId: string): Promise<Budget[]> {
@@ -18,7 +19,7 @@ export class BudgetService {
          AND t.type = 'expense'
          AND t.transaction_date >= b.start_date
          AND (b.end_date IS NULL OR t.transaction_date <= b.end_date)
-       WHERE b.user_id = $1
+       WHERE b.user_id = ?
        GROUP BY b.id, c.name, c.color
        ORDER BY b.created_at DESC`,
       [userId]
@@ -41,7 +42,7 @@ export class BudgetService {
          AND t.type = 'expense'
          AND t.transaction_date >= b.start_date
          AND (b.end_date IS NULL OR t.transaction_date <= b.end_date)
-       WHERE b.id = $1 AND b.user_id = $2
+       WHERE b.id = ? AND b.user_id = ?
        GROUP BY b.id, c.name, c.color`,
       [budgetId, userId]
     );
@@ -56,7 +57,7 @@ export class BudgetService {
   async createBudget(userId: string, data: BudgetCreateInput): Promise<Budget> {
     // Validate category exists and is expense type
     const categoryResult = await query(
-      'SELECT type FROM categories WHERE id = $1 AND (user_id = $2 OR is_default = true)',
+      'SELECT type FROM categories WHERE id = ? AND (user_id = ? OR is_default = true)',
       [data.category_id, userId]
     );
 
@@ -71,8 +72,8 @@ export class BudgetService {
     // Check if budget already exists for this category and period
     const existingResult = await query(
       `SELECT id FROM budgets 
-       WHERE user_id = $1 AND category_id = $2 
-       AND (end_date IS NULL OR end_date >= $3)`,
+       WHERE user_id = ? AND category_id = ? 
+       AND (end_date IS NULL OR end_date >= ?)`,
       [userId, data.category_id, data.start_date]
     );
 
@@ -80,12 +81,14 @@ export class BudgetService {
       throw new AppError('Budget already exists for this category in the specified period', 409);
     }
 
-    const result = await query<Budget>(
+    const id = crypto.randomUUID();
+
+    await query(
       `INSERT INTO budgets 
-       (user_id, category_id, amount, period, start_date, end_date, alert_threshold) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) 
-       RETURNING *`,
+       (id, user_id, category_id, amount, period, start_date, end_date, alert_threshold) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        id,
         userId,
         data.category_id,
         data.amount,
@@ -96,7 +99,7 @@ export class BudgetService {
       ]
     );
 
-    return this.getBudgetById(userId, result.rows[0].id);
+    return this.getBudgetById(userId, id);
   }
 
   async updateBudget(
@@ -106,36 +109,30 @@ export class BudgetService {
   ): Promise<Budget> {
     const updates: string[] = [];
     const values: unknown[] = [];
-    let paramCount = 1;
 
     if (data.amount !== undefined) {
-      updates.push(`amount = $${paramCount}`);
+      updates.push(`amount = ?`);
       values.push(data.amount);
-      paramCount++;
     }
 
     if (data.period !== undefined) {
-      updates.push(`period = $${paramCount}`);
+      updates.push(`period = ?`);
       values.push(data.period);
-      paramCount++;
     }
 
     if (data.start_date !== undefined) {
-      updates.push(`start_date = $${paramCount}`);
+      updates.push(`start_date = ?`);
       values.push(data.start_date);
-      paramCount++;
     }
 
     if (data.end_date !== undefined) {
-      updates.push(`end_date = $${paramCount}`);
+      updates.push(`end_date = ?`);
       values.push(data.end_date);
-      paramCount++;
     }
 
     if (data.alert_threshold !== undefined) {
-      updates.push(`alert_threshold = $${paramCount}`);
+      updates.push(`alert_threshold = ?`);
       values.push(data.alert_threshold);
-      paramCount++;
     }
 
     if (updates.length === 0) {
@@ -145,27 +142,22 @@ export class BudgetService {
     values.push(budgetId);
     values.push(userId);
 
-    const result = await query<Budget>(
+    await query(
       `UPDATE budgets SET ${updates.join(', ')} 
-       WHERE id = $${paramCount} AND user_id = $${paramCount + 1} 
-       RETURNING *`,
+       WHERE id = ? AND user_id = ?`,
       values
     );
-
-    if (result.rows.length === 0) {
-      throw new AppError('Budget not found', 404);
-    }
 
     return this.getBudgetById(userId, budgetId);
   }
 
   async deleteBudget(userId: string, budgetId: string): Promise<void> {
     const result = await query(
-      'DELETE FROM budgets WHERE id = $1 AND user_id = $2 RETURNING id',
+      'DELETE FROM budgets WHERE id = ? AND user_id = ?',
       [budgetId, userId]
     );
 
-    if (result.rows.length === 0) {
+    if (result.rowsAffected === 0) {
       throw new AppError('Budget not found', 404);
     }
   }

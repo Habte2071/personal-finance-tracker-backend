@@ -1,6 +1,8 @@
 import { query, transaction } from '../config/database';
 import { Transaction, TransactionCreateInput, TransactionUpdateInput, TransactionFilters } from '../types';
 import { AppError } from '../middleware/error.middleware';
+import crypto from 'crypto';
+import { PoolConnection } from 'mysql2/promise';
 
 export class TransactionService {
   async getTransactions(userId: string, filters: TransactionFilters): Promise<{ transactions: Transaction[]; total: number }> {
@@ -16,63 +18,54 @@ export class TransactionService {
       limit = 20,
     } = filters;
 
-    let whereClause = 'WHERE t.user_id = $1';
+    let whereClause = 'WHERE t.user_id = ?';
     const params: unknown[] = [userId];
-    let paramCount = 1;
 
     if (startDate) {
-      paramCount++;
-      whereClause += ` AND t.transaction_date >= $${paramCount}`;
+      whereClause += ` AND t.transaction_date >= ?`;
       params.push(startDate);
     }
 
     if (endDate) {
-      paramCount++;
-      whereClause += ` AND t.transaction_date <= $${paramCount}`;
+      whereClause += ` AND t.transaction_date <= ?`;
       params.push(endDate);
     }
 
     if (accountId) {
-      paramCount++;
-      whereClause += ` AND t.account_id = $${paramCount}`;
+      whereClause += ` AND t.account_id = ?`;
       params.push(accountId);
     }
 
     if (categoryId) {
-      paramCount++;
-      whereClause += ` AND t.category_id = $${paramCount}`;
+      whereClause += ` AND t.category_id = ?`;
       params.push(categoryId);
     }
 
     if (type) {
-      paramCount++;
-      whereClause += ` AND t.type = $${paramCount}`;
+      whereClause += ` AND t.type = ?`;
       params.push(type);
     }
 
     if (minAmount !== undefined) {
-      paramCount++;
-      whereClause += ` AND t.amount >= $${paramCount}`;
+      whereClause += ` AND t.amount >= ?`;
       params.push(minAmount);
     }
 
     if (maxAmount !== undefined) {
-      paramCount++;
-      whereClause += ` AND t.amount <= $${paramCount}`;
+      whereClause += ` AND t.amount <= ?`;
       params.push(maxAmount);
     }
 
     // Get total count
     const countResult = await query<{ count: string }>(
       `SELECT COUNT(*) as count FROM transactions t ${whereClause}`,
-      params
+      params as any[]
     );
     const total = parseInt(countResult.rows[0].count);
 
     // Get transactions with pagination
     const offset = (page - 1) * limit;
-    params.push(limit);
-    params.push(offset);
+    const paginatedParams = [...params, limit, offset];
 
     const result = await query<Transaction>(
       `SELECT 
@@ -86,8 +79,8 @@ export class TransactionService {
        LEFT JOIN categories c ON t.category_id = c.id
        ${whereClause}
        ORDER BY t.transaction_date DESC, t.created_at DESC
-       LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`,
-      params
+       LIMIT ? OFFSET ?`,
+      paginatedParams as any[]
     );
 
     return {
@@ -107,8 +100,8 @@ export class TransactionService {
        FROM transactions t
        LEFT JOIN accounts a ON t.account_id = a.id
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.id = $1 AND t.user_id = $2`,
-      [transactionId, userId]
+       WHERE t.id = ? AND t.user_id = ?`,
+      [transactionId, userId] as any[]
     );
 
     if (result.rows.length === 0) {
@@ -130,8 +123,8 @@ export class TransactionService {
 
     // Validate account ownership
     const accountResult = await query(
-      'SELECT id FROM accounts WHERE id = $1 AND user_id = $2',
-      [data.account_id, userId]
+      'SELECT id FROM accounts WHERE id = ? AND user_id = ?',
+      [data.account_id, userId] as any[]
     );
     if (accountResult.rows.length === 0) {
       throw new AppError('Account not found', 404);
@@ -149,8 +142,8 @@ export class TransactionService {
         throw new AppError('Invalid category ID format', 400);
       }
       const categoryResult = await query(
-        'SELECT id FROM categories WHERE id = $1 AND (user_id = $2 OR is_default = true)',
-        [data.category_id, userId]
+        'SELECT id FROM categories WHERE id = ? AND (user_id = ? OR is_default = true)',
+        [data.category_id, userId] as any[]
       );
       if (categoryResult.rows.length === 0) {
         throw new AppError('Category not found', 404);
@@ -158,34 +151,41 @@ export class TransactionService {
       categoryId = data.category_id;
     }
 
+    const id = crypto.randomUUID();
+
     return await transaction(async (client) => {
       try {
         // Insert transaction
-        const transactionResult = await client.query<Transaction>(
+        await client.execute(
           `INSERT INTO transactions 
-           (user_id, account_id, category_id, type, amount, description, transaction_date, notes) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-           RETURNING *`,
-          [
-            userId,
-            data.account_id,
-            categoryId,
-            data.type,
-            data.amount,
-            data.description,
-            data.transaction_date,
-            data.notes || null,
-          ]
+           (id, user_id, account_id, category_id, type, amount, description, transaction_date, notes) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, userId, data.account_id, categoryId, data.type, data.amount, data.description, data.transaction_date, data.notes || null] as any[]
         );
 
         // Compute net change and update account balance
         const netChange = data.type === 'income' ? data.amount : -data.amount;
-        await client.query(
-          'UPDATE accounts SET balance = balance + CAST($1 AS numeric) WHERE id = $2',
-          [netChange, data.account_id]
+        await client.execute(
+          'UPDATE accounts SET balance = balance + ? WHERE id = ?',
+          [netChange, data.account_id] as any[]
         );
 
-        return transactionResult.rows[0];
+        // Retrieve the created transaction
+        const [transactionRows] = await client.execute(
+          `SELECT 
+            t.*,
+            a.name as account_name,
+            c.name as category_name,
+            c.color as category_color,
+            c.icon as category_icon
+           FROM transactions t
+           LEFT JOIN accounts a ON t.account_id = a.id
+           LEFT JOIN categories c ON t.category_id = c.id
+           WHERE t.id = ?`,
+          [id] as any[]
+        );
+        const rows = transactionRows as Transaction[];
+        return rows[0];
       } catch (dbError: any) {
         console.error('❌ Database error in createTransaction:', dbError);
         if (dbError.code === '22P02') {
@@ -209,72 +209,61 @@ export class TransactionService {
     return await transaction(async (client) => {
       // Revert old balance effect (negative of original net change)
       const oldNetChange = existingTransaction.type === 'income' ? existingTransaction.amount : -existingTransaction.amount;
-      await client.query(
-        'UPDATE accounts SET balance = balance - CAST($1 AS numeric) WHERE id = $2',
-        [oldNetChange, existingTransaction.account_id]
+      await client.execute(
+        'UPDATE accounts SET balance = balance - ? WHERE id = ?',
+        [oldNetChange, existingTransaction.account_id] as any[]
       );
 
       const updates: string[] = [];
-      const values: unknown[] = [];
-      let paramCount = 1;
+      const values: any[] = [];
 
       if (data.account_id !== undefined) {
-        updates.push(`account_id = $${paramCount}`);
+        updates.push(`account_id = ?`);
         values.push(data.account_id);
-        paramCount++;
       }
       if (data.category_id !== undefined) {
-        updates.push(`category_id = $${paramCount}`);
+        updates.push(`category_id = ?`);
         values.push(data.category_id);
-        paramCount++;
       }
       if (data.type !== undefined) {
-        updates.push(`type = $${paramCount}`);
+        updates.push(`type = ?`);
         values.push(data.type);
-        paramCount++;
       }
       if (data.amount !== undefined) {
-        updates.push(`amount = $${paramCount}`);
+        updates.push(`amount = ?`);
         values.push(data.amount);
-        paramCount++;
       }
       if (data.description !== undefined) {
-        updates.push(`description = $${paramCount}`);
+        updates.push(`description = ?`);
         values.push(data.description);
-        paramCount++;
       }
       if (data.transaction_date !== undefined) {
-        updates.push(`transaction_date = $${paramCount}`);
+        updates.push(`transaction_date = ?`);
         values.push(data.transaction_date);
-        paramCount++;
       }
       if (data.notes !== undefined) {
-        updates.push(`notes = $${paramCount}`);
+        updates.push(`notes = ?`);
         values.push(data.notes);
-        paramCount++;
       }
 
       if (updates.length === 0) {
         throw new AppError('No fields to update', 400);
       }
 
-      values.push(transactionId);
-      values.push(userId);
+      values.push(transactionId, userId);
 
-      const result = await client.query<Transaction>(
+      await client.execute(
         `UPDATE transactions SET ${updates.join(', ')} 
-         WHERE id = $${paramCount} AND user_id = $${paramCount + 1} 
-         RETURNING *`,
+         WHERE id = ? AND user_id = ?`,
         values
       );
 
-      const updatedTransaction = result.rows[0];
-
       // Apply new balance effect
+      const updatedTransaction = await this.getTransactionById(userId, transactionId);
       const newNetChange = updatedTransaction.type === 'income' ? updatedTransaction.amount : -updatedTransaction.amount;
-      await client.query(
-        'UPDATE accounts SET balance = balance + CAST($1 AS numeric) WHERE id = $2',
-        [newNetChange, updatedTransaction.account_id]
+      await client.execute(
+        'UPDATE accounts SET balance = balance + ? WHERE id = ?',
+        [newNetChange, updatedTransaction.account_id] as any[]
       );
 
       return updatedTransaction;
@@ -284,17 +273,17 @@ export class TransactionService {
   async deleteTransaction(userId: string, transactionId: string): Promise<void> {
     const transaction = await this.getTransactionById(userId, transactionId);
 
-    await transaction_db(async (client) => {
+    await transactionDb(async (client) => {
       // Revert balance
       const netChange = transaction.type === 'income' ? transaction.amount : -transaction.amount;
-      await client.query(
-        'UPDATE accounts SET balance = balance - CAST($1 AS numeric) WHERE id = $2',
-        [netChange, transaction.account_id]
+      await client.execute(
+        'UPDATE accounts SET balance = balance - ? WHERE id = ?',
+        [netChange, transaction.account_id] as any[]
       );
 
-      await client.query(
-        'DELETE FROM transactions WHERE id = $1 AND user_id = $2',
-        [transactionId, userId]
+      await client.execute(
+        'DELETE FROM transactions WHERE id = ? AND user_id = ?',
+        [transactionId, userId] as any[]
       );
     });
   }
@@ -310,8 +299,8 @@ export class TransactionService {
         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expense,
         COUNT(*) as transaction_count
        FROM transactions
-       WHERE user_id = $1 AND transaction_date BETWEEN $2 AND $3`,
-      [userId, startDate, endDate]
+       WHERE user_id = ? AND transaction_date BETWEEN ? AND ?`,
+      [userId, startDate, endDate] as any[]
     );
 
     return {
@@ -324,6 +313,6 @@ export class TransactionService {
 }
 
 // Helper to avoid naming conflict
-const transaction_db = transaction;
+const transactionDb = transaction;
 
 export const transactionService = new TransactionService();

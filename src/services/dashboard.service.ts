@@ -10,7 +10,7 @@ export class DashboardService {
 
     // Get total balance
     const balanceResult = await query<{ total_balance: string }>(
-      'SELECT COALESCE(SUM(balance), 0) as total_balance FROM accounts WHERE user_id = $1 AND is_active = true',
+      'SELECT COALESCE(SUM(balance), 0) as total_balance FROM accounts WHERE user_id = ? AND is_active = true',
       [userId]
     );
 
@@ -23,7 +23,7 @@ export class DashboardService {
         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expense
        FROM transactions
-       WHERE user_id = $1 AND transaction_date >= $2`,
+       WHERE user_id = ? AND transaction_date >= ?`,
       [userId, currentMonthStart.toISOString().split('T')[0]]
     );
 
@@ -36,7 +36,7 @@ export class DashboardService {
         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expense
        FROM transactions
-       WHERE user_id = $1 AND transaction_date BETWEEN $2 AND $3`,
+       WHERE user_id = ? AND transaction_date BETWEEN ? AND ?`,
       [userId, lastMonthStart.toISOString().split('T')[0], lastMonthEnd.toISOString().split('T')[0]]
     );
 
@@ -65,21 +65,27 @@ export class DashboardService {
   }
 
   async getMonthlyTrend(userId: string, months: number = 6): Promise<MonthlyData[]> {
+    // Calculate start date: first day of the month, (months-1) months ago
+    const startDate = new Date();
+    startDate.setDate(1);
+    startDate.setMonth(startDate.getMonth() - (months - 1));
+    const startDateStr = startDate.toISOString().split('T')[0];
+
     const result = await query<{
       month: string;
       income: string;
       expense: string;
     }>(
       `SELECT 
-        TO_CHAR(transaction_date, 'YYYY-MM') as month,
+        DATE_FORMAT(transaction_date, '%Y-%m') as month,
         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expense
        FROM transactions
-       WHERE user_id = $1 
-         AND transaction_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '${months - 1} months')
-       GROUP BY TO_CHAR(transaction_date, 'YYYY-MM')
+       WHERE user_id = ? 
+         AND transaction_date >= ?
+       GROUP BY DATE_FORMAT(transaction_date, '%Y-%m')
        ORDER BY month ASC`,
-      [userId]
+      [userId, startDateStr]
     );
 
     return result.rows.map(row => ({
@@ -107,9 +113,9 @@ export class DashboardService {
         SUM(t.amount) as total
        FROM transactions t
        JOIN categories c ON t.category_id = c.id
-       WHERE t.user_id = $1 
+       WHERE t.user_id = ? 
          AND t.type = 'expense'
-         AND t.transaction_date BETWEEN $2 AND $3
+         AND t.transaction_date BETWEEN ? AND ?
        GROUP BY c.id, c.name, c.color
        ORDER BY total DESC`,
       [
@@ -140,9 +146,9 @@ export class DashboardService {
        FROM transactions t
        LEFT JOIN accounts a ON t.account_id = a.id
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.user_id = $1
+       WHERE t.user_id = ?
        ORDER BY t.transaction_date DESC, t.created_at DESC
-       LIMIT $2`,
+       LIMIT ?`,
       [userId, limit]
     );
 

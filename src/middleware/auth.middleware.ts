@@ -40,21 +40,22 @@ export const authenticate = async (
       return;
     }
 
-    // Fetch user – handle both 'id' and 'user_id' primary keys
-   const result = await query<any>(
-  `SELECT 
-     id,
-     email, 
-     password_hash, 
-     first_name, 
-     last_name, 
-     currency, 
-     created_at, 
-     updated_at 
-   FROM users 
-   WHERE id = $1`,
-  [decoded.userId]
-);
+    // Fetch user – MySQL uses ? placeholders
+    const result = await query<any>(
+      `SELECT 
+         id,
+         email, 
+         password_hash, 
+         first_name, 
+         last_name, 
+         currency, 
+         created_at, 
+         updated_at 
+       FROM users 
+       WHERE id = ?`,
+      [decoded.userId]
+    );
+
     if (result.rows.length === 0) {
       logger.warn(`Authentication failed: User not found for id ${decoded.userId}`);
       res.status(401).json({ success: false, message: 'User not found' });
@@ -71,6 +72,7 @@ export const authenticate = async (
     }
 
     req.user = userRow;
+    // Use userRow directly to avoid TS error about req.user being possibly undefined
     logger.debug('✅ Authentication successful, user attached:', { id: userRow.id, email: userRow.email });
     next();
   } catch (error) {

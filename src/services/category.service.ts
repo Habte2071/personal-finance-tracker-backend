@@ -1,17 +1,18 @@
 import { query } from '../config/database';
 import { Category, CategoryCreateInput } from '../types';
 import { AppError } from '../middleware/error.middleware';
+import crypto from 'crypto';
 
 export class CategoryService {
   async getAllCategories(userId: string, type?: 'income' | 'expense'): Promise<Category[]> {
     let sql = `
       SELECT * FROM categories 
-      WHERE (user_id = $1 OR is_default = true)
+      WHERE (user_id = ? OR is_default = true)
     `;
     const params: unknown[] = [userId];
 
     if (type) {
-      sql += ` AND type = $2`;
+      sql += ` AND type = ?`;
       params.push(type);
     }
 
@@ -24,7 +25,7 @@ export class CategoryService {
   async getCategoryById(userId: string, categoryId: string): Promise<Category> {
     const result = await query<Category>(
       `SELECT * FROM categories 
-       WHERE id = $1 AND (user_id = $2 OR is_default = true)`,
+       WHERE id = ? AND (user_id = ? OR is_default = true)`,
       [categoryId, userId]
     );
 
@@ -36,11 +37,12 @@ export class CategoryService {
   }
 
   async createCategory(userId: string, data: CategoryCreateInput): Promise<Category> {
-    const result = await query<Category>(
-      `INSERT INTO categories (user_id, name, type, color, icon, is_default) 
-       VALUES ($1, $2, $3, $4, $5, false) 
-       RETURNING *`,
+    const id = crypto.randomUUID();
+    await query(
+      `INSERT INTO categories (id, user_id, name, type, color, icon, is_default) 
+       VALUES (?, ?, ?, ?, ?, ?, false)`,
       [
+        id,
         userId,
         data.name,
         data.type,
@@ -49,6 +51,10 @@ export class CategoryService {
       ]
     );
 
+    const result = await query<Category>(
+      'SELECT * FROM categories WHERE id = ?',
+      [id]
+    );
     return result.rows[0];
   }
 
@@ -59,7 +65,7 @@ export class CategoryService {
   ): Promise<Category> {
     // Check if category belongs to user (can't edit default categories)
     const existing = await query<Category>(
-      'SELECT * FROM categories WHERE id = $1 AND user_id = $2 AND is_default = false',
+      'SELECT * FROM categories WHERE id = ? AND user_id = ? AND is_default = false',
       [categoryId, userId]
     );
 
@@ -69,30 +75,25 @@ export class CategoryService {
 
     const updates: string[] = [];
     const values: unknown[] = [];
-    let paramCount = 1;
 
     if (data.name !== undefined) {
-      updates.push(`name = $${paramCount}`);
+      updates.push(`name = ?`);
       values.push(data.name);
-      paramCount++;
     }
 
     if (data.type !== undefined) {
-      updates.push(`type = $${paramCount}`);
+      updates.push(`type = ?`);
       values.push(data.type);
-      paramCount++;
     }
 
     if (data.color !== undefined) {
-      updates.push(`color = $${paramCount}`);
+      updates.push(`color = ?`);
       values.push(data.color);
-      paramCount++;
     }
 
     if (data.icon !== undefined) {
-      updates.push(`icon = $${paramCount}`);
+      updates.push(`icon = ?`);
       values.push(data.icon);
-      paramCount++;
     }
 
     if (updates.length === 0) {
@@ -101,21 +102,25 @@ export class CategoryService {
 
     values.push(categoryId);
 
-    const result = await query<Category>(
-      `UPDATE categories SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+    await query(
+      `UPDATE categories SET ${updates.join(', ')} WHERE id = ?`,
       values
     );
 
+    const result = await query<Category>(
+      'SELECT * FROM categories WHERE id = ?',
+      [categoryId]
+    );
     return result.rows[0];
   }
 
   async deleteCategory(userId: string, categoryId: string): Promise<void> {
     const result = await query(
-      'DELETE FROM categories WHERE id = $1 AND user_id = $2 AND is_default = false RETURNING id',
+      'DELETE FROM categories WHERE id = ? AND user_id = ? AND is_default = false',
       [categoryId, userId]
     );
 
-    if (result.rows.length === 0) {
+    if (result.rowsAffected === 0) {
       throw new AppError('Category not found or cannot delete default categories', 404);
     }
   }

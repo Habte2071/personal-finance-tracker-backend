@@ -2,13 +2,14 @@ import { query } from '../config/database';
 import { Account, AccountCreateInput, AccountUpdateInput } from '../types';
 import { AppError } from '../middleware/error.middleware';
 import logger from '../config';
+import crypto from 'crypto';
 
 export class AccountService {
   async getAllAccounts(userId: string): Promise<Account[]> {
     if (!userId) throw new AppError('User ID is required', 400);
     const result = await query<Account>(
       `SELECT * FROM accounts 
-       WHERE user_id = $1 
+       WHERE user_id = ? 
        ORDER BY is_active DESC, created_at DESC`,
       [userId]
     );
@@ -20,7 +21,7 @@ export class AccountService {
       throw new AppError('User ID and Account ID are required', 400);
     }
     const result = await query<Account>(
-      'SELECT * FROM accounts WHERE id = $1 AND user_id = $2',
+      'SELECT * FROM accounts WHERE id = ? AND user_id = ?',
       [accountId, userId]
     );
     if (result.rows.length === 0) {
@@ -32,11 +33,15 @@ export class AccountService {
   async createAccount(userId: string, data: AccountCreateInput): Promise<Account> {
     if (!userId) throw new AppError('User ID is required', 400);
     const { name, type, balance = 0, currency = 'USD', description = null } = data;
+    const id = crypto.randomUUID();
+    await query(
+      `INSERT INTO accounts (id, user_id, name, type, balance, currency, description) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, userId, name, type, balance, currency, description]
+    );
     const result = await query<Account>(
-      `INSERT INTO accounts (user_id, name, type, balance, currency, description) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING *`,
-      [userId, name, type, balance, currency, description]
+      'SELECT * FROM accounts WHERE id = ?',
+      [id]
     );
     return result.rows[0];
   }
@@ -59,11 +64,10 @@ export class AccountService {
       // Build dynamic UPDATE query
       const updates: string[] = [];
       const values: unknown[] = [];
-      let paramIndex = 1;
 
       const addField = (field: string, value: unknown) => {
         if (value !== undefined) {
-          updates.push(`${field} = $${paramIndex++}`);
+          updates.push(`${field} = ?`);
           values.push(value);
         }
       };
@@ -80,19 +84,22 @@ export class AccountService {
 
       // Append accountId and userId for WHERE clause
       values.push(accountId, userId);
-      const whereClause = `WHERE id = $${paramIndex++} AND user_id = $${paramIndex}`;
 
       const queryText = `
         UPDATE accounts 
         SET ${updates.join(', ')} 
-        ${whereClause}
-        RETURNING *
+        WHERE id = ? AND user_id = ?
       `;
 
       console.log('🟢 queryText:', queryText);
       console.log('🟢 values:', values);
 
-      const result = await query<Account>(queryText, values);
+      await query(queryText, values);
+
+      const result = await query<Account>(
+        'SELECT * FROM accounts WHERE id = ? AND user_id = ?',
+        [accountId, userId]
+      );
 
       if (result.rows.length === 0) {
         throw new AppError('Account not found after update', 404);
@@ -119,7 +126,7 @@ export class AccountService {
     }
 
     const transactionsResult = await query<{ count: string }>(
-      'SELECT COUNT(*) as count FROM transactions WHERE account_id = $1',
+      'SELECT COUNT(*) as count FROM transactions WHERE account_id = ?',
       [accountId]
     );
     const count = parseInt(transactionsResult.rows[0]?.count || '0', 10);
@@ -131,10 +138,10 @@ export class AccountService {
     }
 
     const result = await query(
-      'DELETE FROM accounts WHERE id = $1 AND user_id = $2 RETURNING id',
+      'DELETE FROM accounts WHERE id = ? AND user_id = ?',
       [accountId, userId]
     );
-    if (result.rows.length === 0) {
+    if (result.rowsAffected === 0) {
       throw new AppError('Account not found', 404);
     }
   }
@@ -151,8 +158,8 @@ export class AccountService {
     const multiplier = type === 'income' ? 1 : -1;
     await query(
       `UPDATE accounts 
-       SET balance = balance + ($1 * $2) 
-       WHERE id = $3 AND user_id = $4`,
+       SET balance = balance + (? * ?) 
+       WHERE id = ? AND user_id = ?`,
       [amount, multiplier, accountId, userId]
     );
   }

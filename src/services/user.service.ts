@@ -6,7 +6,7 @@ import { hashPassword } from '../utils/password.utils';
 export class UserService {
   async getProfile(userId: string): Promise<UserResponse> {
     const result = await query<User>(
-      'SELECT id, email, first_name, last_name, currency, created_at FROM users WHERE id = $1',
+      'SELECT id, email, first_name, last_name, currency, created_at FROM users WHERE id = ?',
       [userId]
     );
 
@@ -23,24 +23,20 @@ export class UserService {
   ): Promise<UserResponse> {
     const updates: string[] = [];
     const values: unknown[] = [];
-    let paramCount = 1;
 
     if (data.first_name !== undefined) {
-      updates.push(`first_name = $${paramCount}`);
+      updates.push(`first_name = ?`);
       values.push(data.first_name);
-      paramCount++;
     }
 
     if (data.last_name !== undefined) {
-      updates.push(`last_name = $${paramCount}`);
+      updates.push(`last_name = ?`);
       values.push(data.last_name);
-      paramCount++;
     }
 
     if (data.currency !== undefined) {
-      updates.push(`currency = $${paramCount}`);
+      updates.push(`currency = ?`);
       values.push(data.currency);
-      paramCount++;
     }
 
     if (updates.length === 0) {
@@ -49,10 +45,14 @@ export class UserService {
 
     values.push(userId);
 
-    const result = await query<User>(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} 
-       RETURNING id, email, first_name, last_name, currency, created_at`,
+    await query(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
       values
+    );
+
+    const result = await query<User>(
+      'SELECT id, email, first_name, last_name, currency, created_at FROM users WHERE id = ?',
+      [userId]
     );
 
     if (result.rows.length === 0) {
@@ -67,7 +67,7 @@ export class UserService {
     
     // Get current password hash
     const userResult = await query<{ password_hash: string }>(
-      'SELECT password_hash FROM users WHERE id = $1',
+      'SELECT password_hash FROM users WHERE id = ?',
       [userId]
     );
 
@@ -83,7 +83,7 @@ export class UserService {
 
     // Hash and update new password
     const newHash = await hashPassword(newPassword);
-    await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
+    await query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, userId]);
   }
 
   private formatUserResponse(user: User): UserResponse {
