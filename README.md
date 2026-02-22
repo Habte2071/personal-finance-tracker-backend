@@ -52,7 +52,7 @@ pnpm start
 ## Tech Stack
 
 - **Framework**: Express.js
-- **Database**: PostgreSQL (with pg driver)
+- **Database**: mysql
 - **Auth**: JWT + bcrypt
 - **Validation**: Zod
 - **Logging**: Custom logger
