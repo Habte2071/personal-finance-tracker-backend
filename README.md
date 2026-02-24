@@ -1,6 +1,6 @@
 # Personal Finance Tracker - Backend
 
-This is the backend API for a personal finance tracking application built with Express.js, PostgreSQL, JWT, and TypeScript. It handles user auth, accounts, transactions, budgets, categories, and dashboard data.
+This is the backend API for a personal finance tracking application built with Express.js, Mysql , JWT, and TypeScript. It handles user auth, accounts, transactions, budgets, categories, and dashboard data.
 
 # Development mode (recommended - with ts-node-dev or nodemon)
 
