@@ -7,7 +7,7 @@ import { AuthRequest, BudgetInput } from '../types';
 
 const budgetSchema = z.object({
   body: z.object({
-    category_id: z.string().uuid('Invalid category ID'),
+    category_id: z.number().int().positive('Invalid category ID'),
     amount: z.number().positive('Amount must be positive'),
     period: z.enum(['weekly', 'monthly', 'yearly']),
     start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format'),
@@ -33,7 +33,7 @@ export class BudgetController {
   });
 
   getById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-    const id = req.params.id as string;
+    const id = Number(req.params.id);
     const budget = await budgetService.getBudgetById(req.user!.id, id);
     successResponse(res, budget, 'Budget retrieved successfully');
   });
@@ -45,14 +45,14 @@ export class BudgetController {
   });
 
   update = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-    const id = req.params.id as string;
+    const id = Number(req.params.id);
     const data = req.body as Partial<BudgetInput>;
     const budget = await budgetService.updateBudget(req.user!.id, id, data);
     successResponse(res, budget, 'Budget updated successfully');
   });
 
   delete = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-    const id = req.params.id as string;
+    const id = Number(req.params.id);
     await budgetService.deleteBudget(req.user!.id, id);
     successResponse(res, null, 'Budget deleted successfully');
   });

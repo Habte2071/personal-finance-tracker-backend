@@ -35,20 +35,32 @@ const pool: Pool = createPool({
 
 /**
  * Execute a query and return a result compatible with the old pg interface.
- * Returns an object with `rows` and `rowCount` properties.
+ * Returns an object with `rows`, `rowCount`, and optionally `insertId`.
  */
 export const query = async <T = any>(
   sql: string,
   params?: any[]
-): Promise<{ rows: T[]; rowCount: number; [key: string]: any }> => {
+): Promise<{ rows: T[]; rowCount: number; insertId?: number }> => {
   const start = Date.now();
   try {
-    // Ensure params is an array (default to empty array if undefined)
-    const [rows] = await pool.execute(sql, params || []);
+    const [result] = await pool.execute(sql, params || []);
     const duration = Date.now() - start;
-    const rowCount = Array.isArray(rows) ? rows.length : 0;
-    logger.debug('Executed query', { sql: sql.substring(0, 100), duration, rows: rowCount });
-    return { rows: rows as T[], rowCount };
+
+    // Check if result is a ResultSetHeader (for INSERT/UPDATE/DELETE)
+    if (result && typeof result === 'object' && 'affectedRows' in result) {
+      const header = result as any; // mysql2 ResultSetHeader
+      logger.debug('Executed query', { sql: sql.substring(0, 100), duration, affectedRows: header.affectedRows });
+      return {
+        rows: [] as T[],
+        rowCount: header.affectedRows,
+        insertId: header.insertId,
+      };
+    }
+
+    // Otherwise, it's a SELECT – result is an array of rows
+    const rows = Array.isArray(result) ? result : [];
+    logger.debug('Executed query', { sql: sql.substring(0, 100), duration, rows: rows.length });
+    return { rows: rows as T[], rowCount: rows.length };
   } catch (error) {
     logger.error('Database query error', { error, query: sql.substring(0, 100) });
     throw error;
@@ -67,7 +79,6 @@ export const getClient = async (): Promise<PoolConnection> => {
   (connection as any).execute = async (sql: string, params?: any[]) => {
     const start = Date.now();
     try {
-      // Ensure params is an array (default to empty array if undefined)
       const result = await originalExecute(sql, params || []);
       const duration = Date.now() - start;
       const rows = Array.isArray(result[0]) ? result[0] : [];
@@ -92,7 +103,6 @@ export const transaction = async <T>(
 ): Promise<T> => {
   const connection = await getClient();
   try {
-    // Use query() instead of execute() for transaction control commands
     await connection.query('START TRANSACTION');
     const result = await callback(connection);
     await connection.query('COMMIT');

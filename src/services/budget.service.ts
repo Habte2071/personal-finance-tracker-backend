@@ -1,10 +1,10 @@
 import { query } from '../config/database';
 import { Budget, BudgetCreateInput } from '../types';
 import { AppError } from '../middleware/error.middleware';
-import crypto from 'crypto';
+import logger from '../config';
 
 export class BudgetService {
-  async getAllBudgets(userId: string): Promise<Budget[]> {
+  async getAllBudgets(userId: number): Promise<Budget[]> {
     const result = await query<Budget>(
       `SELECT 
         b.*,
@@ -27,7 +27,7 @@ export class BudgetService {
     return result.rows;
   }
 
-  async getBudgetById(userId: string, budgetId: string): Promise<Budget> {
+  async getBudgetById(userId: number, budgetId: number): Promise<Budget> {
     const result = await query<Budget>(
       `SELECT 
         b.*,
@@ -54,7 +54,7 @@ export class BudgetService {
     return result.rows[0];
   }
 
-  async createBudget(userId: string, data: BudgetCreateInput): Promise<Budget> {
+  async createBudget(userId: number, data: BudgetCreateInput): Promise<Budget> {
     // Validate category exists and is expense type
     const categoryResult = await query(
       'SELECT type FROM categories WHERE id = ? AND (user_id = ? OR is_default = true)',
@@ -81,14 +81,11 @@ export class BudgetService {
       throw new AppError('Budget already exists for this category in the specified period', 409);
     }
 
-    const id = crypto.randomUUID();
-
-    await query(
+    const result = await query(
       `INSERT INTO budgets 
-       (id, user_id, category_id, amount, period, start_date, end_date, alert_threshold) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, category_id, amount, period, start_date, end_date, alert_threshold, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
-        id,
         userId,
         data.category_id,
         data.amount,
@@ -99,14 +96,22 @@ export class BudgetService {
       ]
     );
 
-    return this.getBudgetById(userId, id);
+    const insertId = result.insertId;
+    if (!insertId) throw new AppError('Failed to create budget', 500);
+
+    return this.getBudgetById(userId, insertId);
   }
 
   async updateBudget(
-    userId: string,
-    budgetId: string,
+    userId: number,
+    budgetId: number,
     data: Partial<BudgetCreateInput>
   ): Promise<Budget> {
+    logger.debug('Starting updateBudget:', { userId, budgetId, data });
+
+    // First verify the budget exists and belongs to user
+    await this.getBudgetById(userId, budgetId);
+
     const updates: string[] = [];
     const values: unknown[] = [];
 
@@ -139,8 +144,8 @@ export class BudgetService {
       throw new AppError('No fields to update', 400);
     }
 
-    values.push(budgetId);
-    values.push(userId);
+    updates.push('updated_at = NOW()');
+    values.push(budgetId, userId);
 
     await query(
       `UPDATE budgets SET ${updates.join(', ')} 
@@ -148,24 +153,25 @@ export class BudgetService {
       values
     );
 
+    logger.debug('Budget updated, fetching fresh data');
     return this.getBudgetById(userId, budgetId);
   }
 
-  async deleteBudget(userId: string, budgetId: string): Promise<void> {
+  async deleteBudget(userId: number, budgetId: number): Promise<void> {
     const result = await query(
       'DELETE FROM budgets WHERE id = ? AND user_id = ?',
       [budgetId, userId]
     );
 
-    if (result.rowsAffected === 0) {
+    if (result.rowCount === 0) {
       throw new AppError('Budget not found', 404);
     }
   }
 
-  async getBudgetAlerts(userId: string): Promise<Budget[]> {
+  async getBudgetAlerts(userId: number): Promise<Budget[]> {
     const budgets = await this.getAllBudgets(userId);
     return budgets.filter(budget => 
-      parseFloat(budget.percentage_used as unknown as string) >= budget.alert_threshold
+      Number(budget.percentage_used) >= (budget.alert_threshold || 80)
     );
   }
 }
