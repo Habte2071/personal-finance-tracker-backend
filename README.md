@@ -5,24 +5,16 @@ This is the backend API for a personal finance tracking application built with E
 # Development mode (recommended - with ts-node-dev or nodemon)
 
 npm run dev
-
 # or
-
 yarn dev
-
 # or
-
 pnpm dev
 → server starts on http://localhost:5000
 
 # Build TypeScript → JavaScript
-
 npm run build
-
 # or
-
 yarn build
-
 # or
 
 pnpm build
@@ -70,7 +62,7 @@ pnpm start
 - **Types**: Shared types in `/types/index.ts`.
 - **Error Handling**: Custom AppError class, global handler.
 - **Database**: Connection pool with query wrapper for logging/errors.
-- **Deployment**: Suitable for Heroku (with Procfile, buildpacks for Node.js/Postgres).
+- **Deployment**: Suitable for Hahucloud ( Node.js/mysql).
 
 The app follows MVC-like structure: Routes → Controllers (validate) → Services (DB logic) → Responses.
 
@@ -78,7 +70,7 @@ The app follows MVC-like structure: Routes → Controllers (validate) → Servic
 
 1. **Prerequisites**:
    - Node.js >= 18.x
-   - PostgreSQL >= 14.x
+   - mysql
    - npm or yarn
 
 2. **Clone and Install**:
