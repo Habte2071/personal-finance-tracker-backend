@@ -1,10 +1,10 @@
 import { query } from '../config/database';
 import { Category, CategoryCreateInput } from '../types';
 import { AppError } from '../middleware/error.middleware';
-import crypto from 'crypto';
+import logger from '../config';
 
 export class CategoryService {
-  async getAllCategories(userId: string, type?: 'income' | 'expense'): Promise<Category[]> {
+  async getAllCategories(userId: number, type?: 'income' | 'expense'): Promise<Category[]> {
     let sql = `
       SELECT * FROM categories 
       WHERE (user_id = ? OR is_default = true)
@@ -22,7 +22,7 @@ export class CategoryService {
     return result.rows;
   }
 
-  async getCategoryById(userId: string, categoryId: string): Promise<Category> {
+  async getCategoryById(userId: number, categoryId: number): Promise<Category> {
     const result = await query<Category>(
       `SELECT * FROM categories 
        WHERE id = ? AND (user_id = ? OR is_default = true)`,
@@ -36,13 +36,11 @@ export class CategoryService {
     return result.rows[0];
   }
 
-  async createCategory(userId: string, data: CategoryCreateInput): Promise<Category> {
-    const id = crypto.randomUUID();
-    await query(
-      `INSERT INTO categories (id, user_id, name, type, color, icon, is_default) 
-       VALUES (?, ?, ?, ?, ?, ?, false)`,
+  async createCategory(userId: number, data: CategoryCreateInput): Promise<Category> {
+    const result = await query(
+      `INSERT INTO categories (user_id, name, type, color, icon, is_default, created_at) 
+       VALUES (?, ?, ?, ?, ?, false, NOW())`,
       [
-        id,
         userId,
         data.name,
         data.type,
@@ -51,25 +49,33 @@ export class CategoryService {
       ]
     );
 
-    const result = await query<Category>(
+    const insertId = result.insertId;
+    if (!insertId) throw new AppError('Failed to create category', 500);
+
+    const newCategory = await query<Category>(
       'SELECT * FROM categories WHERE id = ?',
-      [id]
+      [insertId]
     );
-    return result.rows[0];
+    return newCategory.rows[0];
   }
 
   async updateCategory(
-    userId: string,
-    categoryId: string,
+    userId: number,
+    categoryId: number,
     data: Partial<CategoryCreateInput>
   ): Promise<Category> {
+    logger.debug('Starting updateCategory: ' + JSON.stringify({ userId, categoryId, data }));
+
     // Check if category belongs to user (can't edit default categories)
     const existing = await query<Category>(
       'SELECT * FROM categories WHERE id = ? AND user_id = ? AND is_default = false',
       [categoryId, userId]
     );
 
-    if (existing.rows.length === 0) {
+    logger.debug('Existing category query result: ' + JSON.stringify({ rowCount: existing.rowCount }));
+
+    if (!existing.rows || existing.rows.length === 0) {
+      logger.warn('Category not found or is default category: ' + JSON.stringify({ categoryId, userId }));
       throw new AppError('Category not found or cannot edit default categories', 404);
     }
 
@@ -102,6 +108,9 @@ export class CategoryService {
 
     values.push(categoryId);
 
+    // FIXED: Use string concatenation or JSON.stringify for logger
+    logger.debug('Executing update query: ' + `UPDATE categories SET ${updates.join(', ')} WHERE id = ${categoryId}`);
+
     await query(
       `UPDATE categories SET ${updates.join(', ')} WHERE id = ?`,
       values
@@ -111,16 +120,18 @@ export class CategoryService {
       'SELECT * FROM categories WHERE id = ?',
       [categoryId]
     );
+    
+    logger.debug('Category updated successfully: ' + result.rows[0].name);
     return result.rows[0];
   }
 
-  async deleteCategory(userId: string, categoryId: string): Promise<void> {
+  async deleteCategory(userId: number, categoryId: number): Promise<void> {
     const result = await query(
       'DELETE FROM categories WHERE id = ? AND user_id = ? AND is_default = false',
       [categoryId, userId]
     );
 
-    if (result.rowsAffected === 0) {
+    if (result.rowCount === 0) {
       throw new AppError('Category not found or cannot delete default categories', 404);
     }
   }

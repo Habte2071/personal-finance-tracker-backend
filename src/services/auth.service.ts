@@ -1,61 +1,36 @@
 import { query } from '../config/database';
 import { User, UserCreateInput, LoginInput, AuthResponse, UserResponse } from '../types';
-import { hashPassword, comparePassword } from '../utils/password.utils';
-import { generateAccessToken, generateRefreshToken } from '../utils/jwt.utils';
 import { AppError } from '../middleware/error.middleware';
-import crypto from 'crypto';
+import { hashPassword, comparePassword } from '../utils/password.utils';
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt.utils';
 
 export class AuthService {
   async register(data: UserCreateInput): Promise<AuthResponse> {
-    // Check if user exists
-    const existingUser = await query<User>(
-      'SELECT id FROM users WHERE email = ?',
-      [data.email.toLowerCase()]
-    );
+    const { email, password, first_name, last_name, currency = 'USD' } = data;
 
-    if (existingUser.rows.length > 0) {
-      throw new AppError('Email already registered', 409);
+    // Check if user exists
+    const existing = await query('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing.rows.length > 0) {
+      throw new AppError('Email already registered', 400);
     }
 
-    // Hash password
-    const passwordHash = await hashPassword(data.password);
+    const hashedPassword = await hashPassword(password);
 
-    // Generate UUID for new user
-    const id = crypto.randomUUID();
-
-    // Create user
-    await query(
-      `INSERT INTO users (id, email, password_hash, first_name, last_name, currency) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.email.toLowerCase(),
-        passwordHash,
-        data.first_name,
-        data.last_name,
-        data.currency || 'USD',
-      ]
+    // Insert user – id is auto-generated
+    const result = await query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, currency, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+      [email, hashedPassword, first_name, last_name, currency]
     );
 
-    // Retrieve created user
-    const userResult = await query<User>(
-      'SELECT id, email, first_name, last_name, currency, created_at FROM users WHERE id = ?',
-      [id]
-    );
-    const user = userResult.rows[0];
+    const insertId = result.insertId;
+    if (!insertId) {
+      throw new AppError('User creation failed', 500);
+    }
 
-    // Create default accounts for new user
-    const cashId = crypto.randomUUID();
-    const checkingId = crypto.randomUUID();
-    await query(
-      `INSERT INTO accounts (id, user_id, name, type, balance, description) 
-       VALUES 
-       (?, ?, 'Cash', 'cash', 0, 'Physical cash'),
-       (?, ?, 'Main Checking', 'checking', 0, 'Primary checking account')`,
-      [cashId, user.id, checkingId, user.id]
-    );
+    const user = await this.findUserById(insertId);
+    if (!user) throw new AppError('User creation failed', 500);
 
-    // Generate tokens
     const accessToken = generateAccessToken({ userId: user.id, email: user.email });
     const refreshToken = generateRefreshToken({ userId: user.id, email: user.email });
 
@@ -67,20 +42,22 @@ export class AuthService {
   }
 
   async login(data: LoginInput): Promise<AuthResponse> {
+    const { email, password } = data;
+
     const result = await query<User>(
-      'SELECT id, email, password_hash, first_name, last_name, currency, created_at FROM users WHERE email = ?',
-      [data.email.toLowerCase()]
+      'SELECT * FROM users WHERE email = ?',
+      [email]
     );
 
     if (result.rows.length === 0) {
-      throw new AppError('Invalid credentials', 401);
+      throw new AppError('Invalid email or password', 401);
     }
 
     const user = result.rows[0];
+    const isValidPassword = await comparePassword(password, user.password_hash);
 
-    const isValidPassword = await comparePassword(data.password, user.password_hash);
     if (!isValidPassword) {
-      throw new AppError('Invalid credentials', 401);
+      throw new AppError('Invalid email or password', 401);
     }
 
     const accessToken = generateAccessToken({ userId: user.id, email: user.email });
@@ -94,21 +71,10 @@ export class AuthService {
   }
 
   async refreshToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
-    const { verifyRefreshToken, generateAccessToken, generateRefreshToken } = await import('../utils/jwt.utils');
-    
     try {
       const decoded = verifyRefreshToken(refreshToken);
-      
-      const result = await query<User>(
-        'SELECT id, email FROM users WHERE id = ?',
-        [decoded.userId]
-      );
-
-      if (result.rows.length === 0) {
-        throw new AppError('User not found', 401);
-      }
-
-      const user = result.rows[0];
+      const user = await this.findUserById(decoded.userId);
+      if (!user) throw new AppError('User not found', 401);
 
       const newAccessToken = generateAccessToken({ userId: user.id, email: user.email });
       const newRefreshToken = generateRefreshToken({ userId: user.id, email: user.email });
@@ -120,6 +86,11 @@ export class AuthService {
     } catch (error) {
       throw new AppError('Invalid refresh token', 401);
     }
+  }
+
+  private async findUserById(id: number): Promise<User | null> {
+    const result = await query<User>('SELECT * FROM users WHERE id = ?', [id]);
+    return result.rows[0] || null;
   }
 
   private formatUserResponse(user: User): UserResponse {

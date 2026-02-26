@@ -1,3 +1,4 @@
+// In category.routes.ts - TEMPORARY TEST
 import { Router } from 'express';
 import { categoryController, categorySchema, updateCategorySchema } from '../controllers/category.controller';
 import { validate } from '../middleware/validation.middleware';
@@ -10,7 +11,8 @@ router.use(authenticate);
 router.get('/', categoryController.getAll);
 router.get('/:id', categoryController.getById);
 router.post('/', validate(categorySchema), categoryController.create);
-router.patch('/:id', validate(updateCategorySchema), categoryController.update);
+// TEST: Remove validation for update
+router.patch('/:id', categoryController.update);
 router.delete('/:id', categoryController.delete);
 
 export default router;

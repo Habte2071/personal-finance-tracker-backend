@@ -11,7 +11,8 @@ router.get('/', budgetController.getAll);
 router.get('/alerts', budgetController.getAlerts);
 router.get('/:id', budgetController.getById);
 router.post('/', validate(budgetSchema), budgetController.create);
-router.patch('/:id', validate(updateBudgetSchema), budgetController.update);
+// TEST: Bypass validation for update
+router.patch('/:id', budgetController.update);
 router.delete('/:id', budgetController.delete);
 
 export default router;

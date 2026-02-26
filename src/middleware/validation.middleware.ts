@@ -5,21 +5,17 @@ import logger from '../config/index';
 export const validate = (schema: ZodSchema) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const validated = schema.parse({
+      // CRITICAL: Store user before validation
+      const user = (req as any).user;
+      
+      const result = schema.safeParse({
         body: req.body,
         query: req.query,
         params: req.params,
       });
       
-      // Replace request data with validated data
-      req.body = validated.body;
-      req.query = validated.query;
-      req.params = validated.params;
-      
-      next();
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const errors = error.errors.map((err) => ({
+      if (!result.success) {
+        const errors = result.error.errors.map((err) => ({
           field: err.path.join('.'),
           message: err.message,
         }));
@@ -32,7 +28,19 @@ export const validate = (schema: ZodSchema) => {
         return;
       }
       
-      logger.error('Validation error:', error);
+      // Assign validated data
+      req.body = result.data.body;
+      req.query = result.data.query;
+      req.params = result.data.params;
+      
+      // CRITICAL: Restore user if it was lost during validation
+      if (user && !(req as any).user) {
+        (req as any).user = user;
+      }
+      
+      next();
+    } catch (error) {
+      logger.error('Unexpected validation error:', error);
       res.status(500).json({
         success: false,
         message: 'Internal server error during validation',

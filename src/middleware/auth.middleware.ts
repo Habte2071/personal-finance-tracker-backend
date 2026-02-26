@@ -1,4 +1,4 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { AuthRequest } from '../types';
 import { verifyAccessToken } from '../utils/jwt.utils';
 import { query } from '../config/database';
@@ -11,6 +11,7 @@ export const authenticate = async (
 ): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       logger.warn('Authentication failed: No Bearer token');
       res.status(401).json({ success: false, message: 'Access token is required' });
@@ -18,10 +19,11 @@ export const authenticate = async (
     }
 
     const token = authHeader.substring(7);
-    let decoded: { userId: string };
+    let decoded: { userId: number; email: string };
 
     try {
       decoded = verifyAccessToken(token);
+      logger.debug('Token decoded successfully:', { userId: decoded.userId, email: decoded.email });
     } catch (err) {
       if (err instanceof Error) {
         if (err.name === 'TokenExpiredError') {
@@ -40,7 +42,7 @@ export const authenticate = async (
       return;
     }
 
-    // Fetch user – MySQL uses ? placeholders
+    // Fetch user from database
     const result = await query<any>(
       `SELECT 
          id,
@@ -63,17 +65,25 @@ export const authenticate = async (
     }
 
     const userRow = result.rows[0];
-    // Force an 'id' property – take the first non-null value
-    userRow.id = userRow.id || userRow.user_id;
-    if (!userRow.id) {
-      logger.error('User row has no id:', userRow);
-      res.status(500).json({ success: false, message: 'User record corrupted' });
-      return;
-    }
+    
+    // Ensure all required fields are present and properly typed
+    req.user = {
+      id: Number(userRow.id),
+      email: String(userRow.email),
+      password_hash: String(userRow.password_hash),
+      first_name: userRow.first_name ? String(userRow.first_name) : '',
+      last_name: userRow.last_name ? String(userRow.last_name) : '',
+      currency: userRow.currency ? String(userRow.currency) : 'USD',
+      created_at: userRow.created_at ? new Date(userRow.created_at) : new Date(),
+      updated_at: userRow.updated_at ? new Date(userRow.updated_at) : new Date(),
+    };
 
-    req.user = userRow;
-    // Use userRow directly to avoid TS error about req.user being possibly undefined
-    logger.debug('✅ Authentication successful, user attached:', { id: userRow.id, email: userRow.email });
+    logger.debug('✅ Authentication successful, user attached:', { 
+      id: req.user.id, 
+      email: req.user.email,
+      type: typeof req.user.id
+    });
+    
     next();
   } catch (error) {
     logger.error('❌ Unexpected authentication error:', error);

@@ -1,10 +1,10 @@
 import { query } from '../config/database';
 import { User, UserResponse } from '../types';
 import { AppError } from '../middleware/error.middleware';
-import { hashPassword } from '../utils/password.utils';
+import { hashPassword, comparePassword } from '../utils/password.utils';
 
 export class UserService {
-  async getProfile(userId: string): Promise<UserResponse> {
+  async getProfile(userId: number): Promise<UserResponse> {
     const result = await query<User>(
       'SELECT id, email, first_name, last_name, currency, created_at FROM users WHERE id = ?',
       [userId]
@@ -18,7 +18,7 @@ export class UserService {
   }
 
   async updateProfile(
-    userId: string,
+    userId: number,
     data: { first_name?: string; last_name?: string; currency?: string }
   ): Promise<UserResponse> {
     const updates: string[] = [];
@@ -62,10 +62,7 @@ export class UserService {
     return this.formatUserResponse(result.rows[0]);
   }
 
-  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
-    const { comparePassword, hashPassword } = await import('../utils/password.utils');
-    
-    // Get current password hash
+  async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<void> {
     const userResult = await query<{ password_hash: string }>(
       'SELECT password_hash FROM users WHERE id = ?',
       [userId]
@@ -75,13 +72,11 @@ export class UserService {
       throw new AppError('User not found', 404);
     }
 
-    // Verify current password
     const isValid = await comparePassword(currentPassword, userResult.rows[0].password_hash);
     if (!isValid) {
       throw new AppError('Current password is incorrect', 400);
     }
 
-    // Hash and update new password
     const newHash = await hashPassword(newPassword);
     await query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, userId]);
   }

@@ -65,6 +65,11 @@ export const notFoundHandler = (req: Request, res: Response): void => {
   });
 };
 
-export const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
+// FIXED: Properly typed asyncHandler that preserves AuthRequest
+export const asyncHandler = <T extends Request = Request>(
+  fn: (req: T, res: Response, next: NextFunction) => Promise<any>
+) => {
+  return (req: T, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
 };

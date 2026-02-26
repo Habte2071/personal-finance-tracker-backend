@@ -5,12 +5,14 @@ import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.use(authenticate); // All routes below require authentication
+// ✅ Apply authenticate to ALL routes below
+router.use(authenticate);
 
 router.get('/', accountController.getAll);
 router.get('/:id', accountController.getById);
 router.post('/', validate(accountSchema), accountController.create);
-router.patch('/:id', validate(updateAccountSchema), accountController.update);
+// TEST: Remove validation for update to test if req.user issue is resolved
+router.patch('/:id', accountController.update);
 router.delete('/:id', accountController.delete);
 
 export default router;

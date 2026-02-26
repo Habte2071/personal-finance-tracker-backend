@@ -2,7 +2,7 @@ import { Request } from 'express';
 
 // User Types
 export interface User {
-  id: string;
+  id: number;
   email: string;
   password_hash: string;
   first_name: string;
@@ -21,7 +21,7 @@ export interface UserCreateInput {
 }
 
 export interface UserResponse {
-  id: string;
+  id: number;
   email: string;
   first_name: string;
   last_name: string;
@@ -31,7 +31,7 @@ export interface UserResponse {
 
 // Auth Types
 export interface AuthRequest extends Request {
-  user?: User;
+  user?: User;  // Make it optional with ?
 }
 
 export interface LoginInput {
@@ -40,7 +40,7 @@ export interface LoginInput {
 }
 
 export interface TokenPayload {
-  userId: string;
+  userId: number;
   email: string;
   iat?: number;
   exp?: number;
@@ -54,8 +54,8 @@ export interface AuthResponse {
 
 // Account Types
 export interface Account {
-  id: string;
-  user_id: string;
+  id: number;
+  user_id: number;
   name: string;
   type: 'checking' | 'savings' | 'credit_card' | 'cash' | 'investment' | 'other';
   balance: number;
@@ -86,8 +86,8 @@ export type AccountInput = AccountCreateInput;
 
 // Category Types
 export interface Category {
-  id: string;
-  user_id: string | null;
+  id: number;
+  user_id: number | null;
   name: string;
   type: 'income' | 'expense';
   color: string;
@@ -107,10 +107,10 @@ export type CategoryInput = CategoryCreateInput;
 
 // Transaction Types
 export interface Transaction {
-  id: string;
-  user_id: string;
-  account_id: string;
-  category_id: string | null;
+  id: number;
+  user_id: number;
+  account_id: number;
+  category_id: number | null;
   type: 'income' | 'expense' | 'transfer';
   amount: number;
   description: string;
@@ -125,8 +125,8 @@ export interface Transaction {
 }
 
 export interface TransactionCreateInput {
-  account_id: string;
-  category_id?: string;
+  account_id: number;
+  category_id?: number;
   type: 'income' | 'expense' | 'transfer';
   amount: number;
   description: string;
@@ -135,8 +135,8 @@ export interface TransactionCreateInput {
 }
 
 export interface TransactionUpdateInput {
-  account_id?: string;
-  category_id?: string | null;
+  account_id?: number;
+  category_id?: number | null;
   type?: 'income' | 'expense' | 'transfer';
   amount?: number;
   description?: string;
@@ -149,8 +149,8 @@ export type TransactionInput = TransactionCreateInput;
 export interface TransactionFilters {
   startDate?: string;
   endDate?: string;
-  accountId?: string;
-  categoryId?: string;
+  accountId?: number;
+  categoryId?: number;
   type?: 'income' | 'expense' | 'transfer';
   minAmount?: number;
   maxAmount?: number;
@@ -160,9 +160,9 @@ export interface TransactionFilters {
 
 // Budget Types
 export interface Budget {
-  id: string;
-  user_id: string;
-  category_id: string;
+  id: number;
+  user_id: number;
+  category_id: number;
   amount: number;
   period: 'weekly' | 'monthly' | 'yearly';
   start_date: Date;
@@ -178,7 +178,7 @@ export interface Budget {
 }
 
 export interface BudgetCreateInput {
-  category_id: string;
+  category_id: number;
   amount: number;
   period: 'weekly' | 'monthly' | 'yearly';
   start_date: string;
@@ -204,7 +204,7 @@ export interface MonthlyData {
 }
 
 export interface CategorySummary {
-  category_id: string;
+  category_id: number;
   category_name: string;
   category_color: string;
   total: number;
